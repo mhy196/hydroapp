@@ -10,50 +10,66 @@ st.set_page_config(
     page_title="Générateur d'Hydrogrammes", 
     layout="wide", 
     page_icon="🌊",
-    initial_sidebar_state="expanded" # Force l'ouverture au démarrage
+    initial_sidebar_state="expanded"
 )
 
-# --- CORRECTION DU STYLE (CSS) ---
+# --- DESIGN "ELEGANT LIGHT" ---
 st.markdown("""
 <style>
-    /* 1. Force le fond blanc et le texte noir */
-    .stApp { background-color: #FFFFFF; color: #000000; }
-    
-    /* 2. Couleur des titres */
-    h1, h2, h3 { color: #005AB5 !important; }
-    
-    /* 3. Couleur de la barre latérale (Gris très clair) */
+    /* 1. PALETTE DE COULEURS DOUCES */
+    :root {
+        --primary-color: #0077B6;      /* Bleu Océan */
+        --bg-color: #FAFAFA;           /* Blanc Cassé / Neige */
+        --sidebar-bg: #F0F4F8;         /* Gris-Bleu très pâle */
+        --text-color: #2C3E50;         /* Gris Anthracite (plus doux que noir) */
+        --border-color: #E1E4E8;
+    }
+
+    /* 2. APPLICATION DU FOND ET DU TEXTE */
+    .stApp {
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    }
+
+    /* 3. BARRE LATÉRALE ÉLÉGANTE */
     section[data-testid="stSidebar"] {
-        background-color: #F8F9FA; 
-        border-right: 1px solid #ddd;
+        background-color: var(--sidebar-bg);
+        border-right: 1px solid var(--border-color);
     }
     
-    /* 4. CORRECTION CRITIQUE : FORCE LA FLÈCHE DU MENU À ÊTRE VISIBLE ET BLEUE */
+    /* 4. TITRES PROPRES */
+    h1, h2, h3 {
+        color: var(--primary-color) !important;
+        font-weight: 600;
+    }
+    
+    /* 5. BOUTON DE MENU (LA FLÈCHE) - RENDU VISIBLE ET ESTHÉTIQUE */
     button[kind="header"] {
         background-color: transparent !important;
-        color: #005AB5 !important; /* Flèche bleue */
-        border: 1px solid #ddd !important;
+        color: var(--primary-color) !important;
         visibility: visible !important;
         display: block !important;
     }
-    
-    /* Alternative pour les versions plus récentes de Streamlit */
     [data-testid="stSidebarCollapsedControl"] {
-        color: #005AB5 !important;
+        color: var(--primary-color) !important;
         background-color: white !important;
-        display: block !important;
-        border-radius: 5px;
-        border: 1px solid #eee;
+        border: 1px solid var(--border-color);
+        border-radius: 6px;
     }
 
-    /* 5. Style des Sliders */
-    .stSlider > div > div > div > div { background-color: #005AB5; }
+    /* 6. WIDGETS ET SLIDERS */
+    .stSlider > div > div > div > div { background-color: var(--primary-color); }
+    div[data-baseweb="select"] > div { background-color: white; border-color: var(--border-color); }
+    
+    /* 7. REGLAGES DIVERS */
+    div[data-testid="stToolbar"] { visibility: hidden; } /* Cache le menu debug */
     
 </style>
 """, unsafe_allow_html=True)
 
 st.title("🌊 Générateur d'Hydrogrammes")
-st.markdown("Chargez vos données, personnalisez les couleurs et ajustez les étiquettes si besoin.")
+st.markdown("---")
 
 # --- BARRE LATÉRALE ---
 
@@ -61,23 +77,25 @@ st.markdown("Chargez vos données, personnalisez les couleurs et ajustez les ét
 st.sidebar.header("1. Vos Données")
 uploaded_file = st.sidebar.file_uploader("Glissez votre fichier CSV ici", type=["csv"])
 
-# 2. APPARENCE SIMPLE
+# 2. APPARENCE
 st.sidebar.header("2. Apparence")
 title = st.sidebar.text_input("Titre du graphique", "Hydrogramme de Crue")
+
+# Couleurs par défaut plus élégantes
 c1, c2 = st.sidebar.columns(2)
-col_sim_pick = c1.color_picker("Simulé", "#005AB5")
-col_obs_pick = c2.color_picker("Observé", "#DC3220")
+col_sim_pick = c1.color_picker("Simulé", "#0288D1") # Un bleu plus moderne
+col_obs_pick = c2.color_picker("Observé", "#D32F2F") # Un rouge moins agressif
 
 # 3. RÉGLAGES AVANCÉS
-with st.sidebar.expander("⚙️ Réglages Avancés (Pics & Axes)"):
+with st.sidebar.expander("⚙️ Réglages Avancés"):
     st.markdown("**Paramètres des Pics**")
     n_peaks = st.slider("Nombre de pics max", 1, 20, 6)
     peak_sensitivity = st.slider("Sensibilité détection", 1, 200, 10)
     
     st.markdown("**Mise en page**")
-    global_x_offset = st.slider("Écartement horizontal global", 0, 100, 25)
+    global_x_offset = st.slider("Écartement horizontal", 0, 100, 25)
     label_size = st.slider("Taille du texte", 8, 20, 11)
-    show_hours = st.checkbox("Afficher les heures (Axe X)", value=True)
+    show_hours = st.checkbox("Afficher les heures", value=True)
     
     st.markdown("**Titres des Axes**")
     ylabel = st.text_input("Titre Axe Y", "Débit (m³/s)")
@@ -96,7 +114,7 @@ if uploaded_file:
     try:
         df = pd.read_csv(uploaded_file)
         
-        # Détection intelligente des colonnes
+        # Détection auto
         cols = df.columns.tolist()
         default_date = next((c for c in cols if "date" in c.lower()), cols[0])
         default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
@@ -111,19 +129,19 @@ if uploaded_file:
         df['Datetime'] = pd.to_datetime(df[date_col])
         df = df.sort_values('Datetime')
         
-        # --- DÉTECTION ---
+        # DÉTECTION
         sim_indices = get_peak_indices(df[sim_col], n_peaks, prominence=peak_sensitivity)
         obs_indices = get_peak_indices(df[obs_col], n_peaks, prominence=peak_sensitivity)
         
-        # --- AJUSTEMENT MANUEL ---
+        # AJUSTEMENT MANUEL
         st.sidebar.markdown("---")
         st.sidebar.header("3. Ajustement Manuel")
-        st.sidebar.info("Déplacez les étiquettes qui se chevauchent.")
+        st.sidebar.caption("Déplacez les étiquettes si elles se chevauchent.")
         
         manual_offsets = {} 
         expand_manual = len(sim_indices) + len(obs_indices) < 10
         
-        with st.sidebar.expander("🔵 Position Pics Simulé", expanded=expand_manual):
+        with st.sidebar.expander("🔵 Pics Simulé", expanded=expand_manual):
             for idx in sim_indices:
                 t_str = df.loc[idx, 'Datetime'].strftime('%d/%m %Hh')
                 v = df.loc[idx, sim_col]
@@ -134,7 +152,7 @@ if uploaded_file:
                 manual_offsets[f"sim_{idx}"] = (dx, dy)
                 st.markdown("---")
 
-        with st.sidebar.expander("🔴 Position Pics Observé", expanded=expand_manual):
+        with st.sidebar.expander("🔴 Pics Observé", expanded=expand_manual):
             for idx in obs_indices:
                 t_str = df.loc[idx, 'Datetime'].strftime('%d/%m %Hh')
                 v = df.loc[idx, obs_col]
@@ -145,41 +163,50 @@ if uploaded_file:
                 manual_offsets[f"obs_{idx}"] = (dx, dy)
                 st.markdown("---")
 
-        # --- GÉNÉRATION ---
+        # GÉNÉRATION GRAPHIQUE
+        # Astuce : facecolor='none' pour que le plot se fonde dans le fond de l'app, 
+        # ou 'white' pour faire une "carte" blanche distincte. 'white' est plus pro pour l'export.
         fig, ax = plt.subplots(figsize=(16, 9), facecolor='white')
         
-        ax.plot(df['Datetime'], df[sim_col], color=col_sim_pick, lw=3, label='Débit Simulé', zorder=2)
-        ax.plot(df['Datetime'], df[obs_col], color=col_obs_pick, lw=3, ls='--', label='Débit Observé', zorder=2)
+        ax.plot(df['Datetime'], df[sim_col], color=col_sim_pick, lw=2.5, label='Débit Simulé', zorder=2)
+        ax.plot(df['Datetime'], df[obs_col], color=col_obs_pick, lw=2.5, ls='--', label='Débit Observé', zorder=2)
         
         def draw_labels(indices, col_name, color, is_sim):
             for idx in indices:
                 val = df.loc[idx, col_name]
                 time = df.loc[idx, 'Datetime']
                 
-                # Position par défaut (Simulé à Droite, Observé à Gauche)
+                # Position par défaut (Simulé Droite, Obs Gauche)
                 base_x = global_x_offset if is_sim else -global_x_offset
                 base_y = 40 
                 
-                # Ajout manuel
                 k = f"sim_{idx}" if is_sim else f"obs_{idx}"
                 mdx, mdy = manual_offsets.get(k, (0,0))
                 
-                ax.scatter(time, val, color=color, s=200, zorder=5, edgecolors='white', lw=2)
+                # Point
+                ax.scatter(time, val, color=color, s=180, zorder=5, edgecolors='white', lw=2)
+                
+                # Étiquette
                 ax.annotate(f"{val:.0f}", xy=(time, val), xytext=(base_x + mdx, base_y + mdy), 
                             textcoords='offset points', ha='center', va='bottom', 
                             fontsize=label_size, fontweight='bold', color=color,
-                            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color, lw=2, alpha=1.0),
-                            arrowprops=dict(arrowstyle="-", color=color, lw=2), zorder=10)
+                            # Fond blanc légèrement transparent pour élégance (0.95)
+                            bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color, lw=1.5, alpha=0.95),
+                            arrowprops=dict(arrowstyle="-", color=color, lw=1.5), zorder=10)
 
         draw_labels(sim_indices, sim_col, col_sim_pick, is_sim=True)
         draw_labels(obs_indices, obs_col, col_obs_pick, is_sim=False)
         
-        # Style
-        ax.set_title(title, fontsize=22, fontweight='bold', pad=25, color='#222')
-        ax.set_ylabel(ylabel, fontsize=14, fontweight='bold')
-        ax.set_xlabel(xlabel, fontsize=14, fontweight='bold')
-        ax.grid(True, alpha=0.3, color='black', ls=':')
-        ax.legend(fontsize=12, loc='upper right', frameon=True, framealpha=1.0, facecolor='white', edgecolor='#ccc').set_zorder(10)
+        # Style Pro
+        ax.set_title(title, fontsize=20, fontweight='600', pad=20, color='#2C3E50')
+        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold', color='#2C3E50')
+        ax.set_xlabel(xlabel, fontsize=12, fontweight='bold', color='#2C3E50')
+        
+        # Grille subtile
+        ax.grid(True, alpha=0.2, color='#2C3E50', ls='-')
+        
+        # Légende propre
+        ax.legend(fontsize=11, loc='upper right', frameon=True, framealpha=1.0, facecolor='white', edgecolor='#E1E4E8').set_zorder(10)
         
         # Axe X
         duration = (df['Datetime'].max() - df['Datetime'].min()).days
@@ -191,8 +218,10 @@ if uploaded_file:
             fmt = '%d/%m %Hh' if show_hours else '%d/%m'
         ax.xaxis.set_major_locator(locator)
         ax.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
-        plt.setp(ax.get_xticklabels(), rotation=90, ha='center', fontsize=11)
-        for spine in ax.spines.values(): spine.set_edgecolor('#333')
+        plt.setp(ax.get_xticklabels(), rotation=90, ha='center', fontsize=10)
+        
+        # Bordures douces
+        for spine in ax.spines.values(): spine.set_edgecolor('#BDC3C7')
             
         st.pyplot(fig)
         
@@ -204,8 +233,7 @@ if uploaded_file:
 
     except Exception as e:
         st.error(f"Une erreur est survenue : {e}")
-        st.info("Vérifiez que votre fichier CSV contient bien des colonnes Date, Simulé et Observé.")
+        st.info("Vérifiez que votre fichier CSV est correct.")
 
 else:
-    # Mode Accueil (Vide)
     st.info("👈 Commencez par glisser votre fichier CSV dans le menu de gauche.")
