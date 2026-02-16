@@ -6,7 +6,8 @@ from scipy.signal import find_peaks
 import io
 
 # --- CONFIGURATION PAGE ---
-st.set_page_config(page_title="Générateur d'Hydrogrammes", layout="wide", page_icon="🌊")
+st.set_page_config(page_title="Générateur d'Hydrogrammes", layout="wide", page_icon="🌊",
+    initial_sidebar_state="expanded")
 
 # Force le thème clair
 st.markdown("""
