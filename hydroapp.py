@@ -6,20 +6,53 @@ from scipy.signal import find_peaks
 import io
 
 # --- CONFIGURATION PAGE ---
-st.set_page_config(page_title="Générateur d'Hydrogrammes", layout="wide", page_icon="🌊",
-    initial_sidebar_state="expanded")
+st.set_page_config(
+    page_title="Générateur d'Hydrogrammes", 
+    layout="wide", 
+    page_icon="🌊",
+    initial_sidebar_state="expanded" # Force l'ouverture au démarrage
+)
 
-# Force le thème clair
+# --- CORRECTION DU STYLE (CSS) ---
 st.markdown("""
 <style>
+    /* 1. Force le fond blanc et le texte noir */
     .stApp { background-color: #FFFFFF; color: #000000; }
-    .css-1d391kg, .css-12oz5g7 { background-color: #F0F2F6; }
+    
+    /* 2. Couleur des titres */
     h1, h2, h3 { color: #005AB5 !important; }
-    div[data-testid="stToolbar"] { visibility: hidden; }
+    
+    /* 3. Couleur de la barre latérale (Gris très clair) */
+    section[data-testid="stSidebar"] {
+        background-color: #F8F9FA; 
+        border-right: 1px solid #ddd;
+    }
+    
+    /* 4. CORRECTION CRITIQUE : FORCE LA FLÈCHE DU MENU À ÊTRE VISIBLE ET BLEUE */
+    button[kind="header"] {
+        background-color: transparent !important;
+        color: #005AB5 !important; /* Flèche bleue */
+        border: 1px solid #ddd !important;
+        visibility: visible !important;
+        display: block !important;
+    }
+    
+    /* Alternative pour les versions plus récentes de Streamlit */
+    [data-testid="stSidebarCollapsedControl"] {
+        color: #005AB5 !important;
+        background-color: white !important;
+        display: block !important;
+        border-radius: 5px;
+        border: 1px solid #eee;
+    }
+
+    /* 5. Style des Sliders */
+    .stSlider > div > div > div > div { background-color: #005AB5; }
+    
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🌊 Générateur d'Hydrogrammes Facile")
+st.title("🌊 Générateur d'Hydrogrammes")
 st.markdown("Chargez vos données, personnalisez les couleurs et ajustez les étiquettes si besoin.")
 
 # --- BARRE LATÉRALE ---
@@ -35,7 +68,7 @@ c1, c2 = st.sidebar.columns(2)
 col_sim_pick = c1.color_picker("Simulé", "#005AB5")
 col_obs_pick = c2.color_picker("Observé", "#DC3220")
 
-# 3. RÉGLAGES AVANCÉS (Cachés par défaut)
+# 3. RÉGLAGES AVANCÉS
 with st.sidebar.expander("⚙️ Réglages Avancés (Pics & Axes)"):
     st.markdown("**Paramètres des Pics**")
     n_peaks = st.slider("Nombre de pics max", 1, 20, 6)
@@ -65,19 +98,16 @@ if uploaded_file:
         
         # Détection intelligente des colonnes
         cols = df.columns.tolist()
-        # On essaie de trouver "date", "sim", "obs" automatiquement
         default_date = next((c for c in cols if "date" in c.lower()), cols[0])
         default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
         default_obs = next((c for c in cols if "obs" in c.lower()), cols[2] if len(cols)>2 else cols[0])
 
-        # Sélecteurs discrets
         with st.expander("Vérifier les colonnes détectées", expanded=False):
             c1, c2, c3 = st.columns(3)
             date_col = c1.selectbox("Date", cols, index=cols.index(default_date))
             sim_col = c2.selectbox("Simulé", cols, index=cols.index(default_sim))
             obs_col = c3.selectbox("Observé", cols, index=cols.index(default_obs))
         
-        # Conversion
         df['Datetime'] = pd.to_datetime(df[date_col])
         df = df.sort_values('Datetime')
         
@@ -91,8 +121,6 @@ if uploaded_file:
         st.sidebar.info("Déplacez les étiquettes qui se chevauchent.")
         
         manual_offsets = {} 
-
-        # On utilise des expanders ouverts par défaut uniquement s'il y a peu de pics, sinon fermés
         expand_manual = len(sim_indices) + len(obs_indices) < 10
         
         with st.sidebar.expander("🔵 Position Pics Simulé", expanded=expand_manual):
@@ -181,8 +209,3 @@ if uploaded_file:
 else:
     # Mode Accueil (Vide)
     st.info("👈 Commencez par glisser votre fichier CSV dans le menu de gauche.")
-    st.markdown("### Comment ça marche ?")
-    st.markdown("1. Importez votre fichier CSV.")
-    st.markdown("2. Les colonnes sont détectées automatiquement.")
-    st.markdown("3. Ajustez les pics qui se chevauchent avec le menu 'Ajustement Manuel'.")
-    st.markdown("4. Téléchargez votre image.")
