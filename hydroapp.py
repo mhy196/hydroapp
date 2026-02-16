@@ -13,58 +13,65 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- DESIGN "ELEGANT LIGHT" ---
+# --- CSS RÉPARATEUR & DESIGN ---
 st.markdown("""
 <style>
-    /* 1. PALETTE DE COULEURS DOUCES */
+    /* 1. PALETTE DE COULEURS */
     :root {
-        --primary-color: #0077B6;      /* Bleu Océan */
-        --bg-color: #FAFAFA;           /* Blanc Cassé / Neige */
-        --sidebar-bg: #F0F4F8;         /* Gris-Bleu très pâle */
-        --text-color: #2C3E50;         /* Gris Anthracite (plus doux que noir) */
-        --border-color: #E1E4E8;
+        --primary-color: #0277BD;      /* Bleu Pro */
+        --bg-color: #FAFAFA;           /* Blanc Cassé */
+        --sidebar-bg: #F5F7F9;         /* Gris perle pour la sidebar */
+        --text-main: #2C3E50;          /* Gris foncé pour le texte principal */
+        --text-sidebar: #1F2937;       /* Noir doux pour la sidebar (LISIBILITÉ MAX) */
     }
 
-    /* 2. APPLICATION DU FOND ET DU TEXTE */
+    /* 2. STYLE GLOBAL */
     .stApp {
         background-color: var(--bg-color);
-        color: var(--text-color);
-        font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+        color: var(--text-main);
     }
-
-    /* 3. BARRE LATÉRALE ÉLÉGANTE */
+    
+    /* 3. BARRE LATÉRALE - CONTRASTE FORCÉ */
     section[data-testid="stSidebar"] {
         background-color: var(--sidebar-bg);
-        border-right: 1px solid var(--border-color);
+        border-right: 1px solid #E5E7EB;
     }
     
-    /* 4. TITRES PROPRES */
-    h1, h2, h3 {
-        color: var(--primary-color) !important;
-        font-weight: 600;
+    /* Force la couleur des textes dans la sidebar (labels, headers, markdown) */
+    section[data-testid="stSidebar"] h1, 
+    section[data-testid="stSidebar"] h2, 
+    section[data-testid="stSidebar"] h3, 
+    section[data-testid="stSidebar"] label, 
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div,
+    section[data-testid="stSidebar"] p {
+        color: var(--text-sidebar) !important;
     }
     
-    /* 5. BOUTON DE MENU (LA FLÈCHE) - RENDU VISIBLE ET ESTHÉTIQUE */
+    /* 4. BOUTON DE MENU (FLÈCHE) */
     button[kind="header"] {
         background-color: transparent !important;
         color: var(--primary-color) !important;
-        visibility: visible !important;
-        display: block !important;
     }
     [data-testid="stSidebarCollapsedControl"] {
         color: var(--primary-color) !important;
         background-color: white !important;
-        border: 1px solid var(--border-color);
-        border-radius: 6px;
+        border: 1px solid #ddd;
     }
 
-    /* 6. WIDGETS ET SLIDERS */
+    /* 5. TITRES PRINCIPAUX */
+    h1 { color: var(--primary-color) !important; }
+    
+    /* 6. INPUTS & SLIDERS */
+    /* Fond blanc pour les inputs pour contraster avec le gris de la sidebar */
+    .stTextInput > div > div > input {
+        background-color: #FFFFFF !important;
+        color: #000000 !important;
+    }
+    /* Sliders en bleu */
     .stSlider > div > div > div > div { background-color: var(--primary-color); }
-    div[data-baseweb="select"] > div { background-color: white; border-color: var(--border-color); }
-    
-    /* 7. REGLAGES DIVERS */
-    div[data-testid="stToolbar"] { visibility: hidden; } /* Cache le menu debug */
-    
+
+    div[data-testid="stToolbar"] { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -81,10 +88,9 @@ uploaded_file = st.sidebar.file_uploader("Glissez votre fichier CSV ici", type=[
 st.sidebar.header("2. Apparence")
 title = st.sidebar.text_input("Titre du graphique", "Hydrogramme de Crue")
 
-# Couleurs par défaut plus élégantes
 c1, c2 = st.sidebar.columns(2)
-col_sim_pick = c1.color_picker("Simulé", "#0288D1") # Un bleu plus moderne
-col_obs_pick = c2.color_picker("Observé", "#D32F2F") # Un rouge moins agressif
+col_sim_pick = c1.color_picker("Simulé", "#0288D1") 
+col_obs_pick = c2.color_picker("Observé", "#D32F2F")
 
 # 3. RÉGLAGES AVANCÉS
 with st.sidebar.expander("⚙️ Réglages Avancés"):
@@ -164,8 +170,6 @@ if uploaded_file:
                 st.markdown("---")
 
         # GÉNÉRATION GRAPHIQUE
-        # Astuce : facecolor='none' pour que le plot se fonde dans le fond de l'app, 
-        # ou 'white' pour faire une "carte" blanche distincte. 'white' est plus pro pour l'export.
         fig, ax = plt.subplots(figsize=(16, 9), facecolor='white')
         
         ax.plot(df['Datetime'], df[sim_col], color=col_sim_pick, lw=2.5, label='Débit Simulé', zorder=2)
@@ -176,39 +180,30 @@ if uploaded_file:
                 val = df.loc[idx, col_name]
                 time = df.loc[idx, 'Datetime']
                 
-                # Position par défaut (Simulé Droite, Obs Gauche)
                 base_x = global_x_offset if is_sim else -global_x_offset
                 base_y = 40 
                 
                 k = f"sim_{idx}" if is_sim else f"obs_{idx}"
                 mdx, mdy = manual_offsets.get(k, (0,0))
                 
-                # Point
                 ax.scatter(time, val, color=color, s=180, zorder=5, edgecolors='white', lw=2)
                 
-                # Étiquette
                 ax.annotate(f"{val:.0f}", xy=(time, val), xytext=(base_x + mdx, base_y + mdy), 
                             textcoords='offset points', ha='center', va='bottom', 
                             fontsize=label_size, fontweight='bold', color=color,
-                            # Fond blanc légèrement transparent pour élégance (0.95)
                             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=color, lw=1.5, alpha=0.95),
                             arrowprops=dict(arrowstyle="-", color=color, lw=1.5), zorder=10)
 
         draw_labels(sim_indices, sim_col, col_sim_pick, is_sim=True)
         draw_labels(obs_indices, obs_col, col_obs_pick, is_sim=False)
         
-        # Style Pro
         ax.set_title(title, fontsize=20, fontweight='600', pad=20, color='#2C3E50')
         ax.set_ylabel(ylabel, fontsize=12, fontweight='bold', color='#2C3E50')
         ax.set_xlabel(xlabel, fontsize=12, fontweight='bold', color='#2C3E50')
         
-        # Grille subtile
         ax.grid(True, alpha=0.2, color='#2C3E50', ls='-')
-        
-        # Légende propre
         ax.legend(fontsize=11, loc='upper right', frameon=True, framealpha=1.0, facecolor='white', edgecolor='#E1E4E8').set_zorder(10)
         
-        # Axe X
         duration = (df['Datetime'].max() - df['Datetime'].min()).days
         if duration < 5:
             locator = mdates.HourLocator(interval=4 if show_hours else 24)
@@ -220,12 +215,10 @@ if uploaded_file:
         ax.xaxis.set_major_formatter(mdates.DateFormatter(fmt))
         plt.setp(ax.get_xticklabels(), rotation=90, ha='center', fontsize=10)
         
-        # Bordures douces
         for spine in ax.spines.values(): spine.set_edgecolor('#BDC3C7')
             
         st.pyplot(fig)
         
-        # Download
         clean_title = title.replace(" ", "_").lower()
         img = io.BytesIO()
         fig.savefig(img, format='png', dpi=300, bbox_inches='tight', facecolor='white')
