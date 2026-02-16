@@ -13,16 +13,16 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- CSS RÉPARATEUR & DESIGN ---
+# --- CSS CORRECTIF & DESIGN ---
 st.markdown("""
 <style>
     /* 1. PALETTE DE COULEURS */
     :root {
         --primary-color: #0277BD;      /* Bleu Pro */
         --bg-color: #FAFAFA;           /* Blanc Cassé */
-        --sidebar-bg: #F5F7F9;         /* Gris perle pour la sidebar */
-        --text-main: #2C3E50;          /* Gris foncé pour le texte principal */
-        --text-sidebar: #1F2937;       /* Noir doux pour la sidebar (LISIBILITÉ MAX) */
+        --sidebar-bg: #F5F7F9;         /* Gris perle */
+        --text-main: #2C3E50;          /* Gris foncé */
+        --text-sidebar: #1F2937;       /* Noir doux */
     }
 
     /* 2. STYLE GLOBAL */
@@ -31,13 +31,13 @@ st.markdown("""
         color: var(--text-main);
     }
     
-    /* 3. BARRE LATÉRALE - CONTRASTE FORCÉ */
+    /* 3. BARRE LATÉRALE */
     section[data-testid="stSidebar"] {
         background-color: var(--sidebar-bg);
         border-right: 1px solid #E5E7EB;
     }
     
-    /* Force la couleur des textes dans la sidebar (labels, headers, markdown) */
+    /* Force la couleur des textes sidebar */
     section[data-testid="stSidebar"] h1, 
     section[data-testid="stSidebar"] h2, 
     section[data-testid="stSidebar"] h3, 
@@ -48,7 +48,23 @@ st.markdown("""
         color: var(--text-sidebar) !important;
     }
     
-    /* 4. BOUTON DE MENU (FLÈCHE) */
+    /* 4. BOUTON UPLOAD (CORRECTION VISIBILITÉ) */
+    [data-testid="stFileUploader"] {
+        color: var(--text-sidebar) !important;
+    }
+    [data-testid="stFileUploader"] section {
+        background-color: #FFFFFF !important;
+        border: 1px dashed #B0BEC5 !important;
+    }
+    [data-testid="stFileUploader"] span {
+        color: #37474F !important; /* Texte gris foncé force */
+        font-weight: 500;
+    }
+    [data-testid="stFileUploader"] svg {
+        fill: #0277BD !important; /* Icône bleue */
+    }
+    
+    /* 5. BOUTON DE MENU (FLÈCHE) */
     button[kind="header"] {
         background-color: transparent !important;
         color: var(--primary-color) !important;
@@ -59,18 +75,18 @@ st.markdown("""
         border: 1px solid #ddd;
     }
 
-    /* 5. TITRES PRINCIPAUX */
-    h1 { color: var(--primary-color) !important; }
-    
-    /* 6. INPUTS & SLIDERS */
-    /* Fond blanc pour les inputs pour contraster avec le gris de la sidebar */
-    .stTextInput > div > div > input {
-        background-color: #FFFFFF !important;
-        color: #000000 !important;
+    /* 6. SLIDERS (PERSONNALISÉS) */
+    /* La barre du slider */
+    .stSlider > div > div > div > div { 
+        background-color: var(--primary-color) !important; 
     }
-    /* Sliders en bleu */
-    .stSlider > div > div > div > div { background-color: var(--primary-color); }
+    /* Le texte de valeur du slider */
+    .stSlider > div > div > div[data-testid="stMarkdownContainer"] p {
+        color: var(--text-sidebar) !important;
+    }
 
+    /* 7. REGLAGES DIVERS */
+    h1 { color: var(--primary-color) !important; }
     div[data-testid="stToolbar"] { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
@@ -99,7 +115,9 @@ with st.sidebar.expander("⚙️ Réglages Avancés"):
     peak_sensitivity = st.slider("Sensibilité détection", 1, 200, 10)
     
     st.markdown("**Mise en page**")
-    global_x_offset = st.slider("Écartement horizontal", 0, 100, 25)
+    # SLIDER MODIFIÉ : DE -100 à +100
+    global_x_offset = st.slider("Écartement horizontal (Négatif=Inverse)", -100, 100, 25, help="Positif : Simulé à Droite. Négatif : Simulé à Gauche.")
+    
     label_size = st.slider("Taille du texte", 8, 20, 11)
     show_hours = st.checkbox("Afficher les heures", value=True)
     
@@ -180,6 +198,8 @@ if uploaded_file:
                 val = df.loc[idx, col_name]
                 time = df.loc[idx, 'Datetime']
                 
+                # Position par défaut (Simulé Droite, Obs Gauche)
+                # Si global_x_offset est négatif, cela inverse naturellement
                 base_x = global_x_offset if is_sim else -global_x_offset
                 base_y = 40 
                 
