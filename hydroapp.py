@@ -211,7 +211,7 @@ with st.sidebar.expander("⚙️ Réglages Avancés"):
     n_peaks = st.slider("Max Pics", 1, 20, 6)
     peak_sensitivity = st.slider("Sensibilité", 1, 200, 10)
     # --- NOUVEAU : TAILLE DES POINTS ---
-    point_size = st.slider("Taille des points", 50, 500, 180, step=10)
+    point_size = st.slider("Taille des points", 10, 500, 180, step=10)
     
     st.markdown("**Layout**")
     global_x_offset = st.slider("Écart Horizontal (Neg=Inv)", -100, 100, 25)
