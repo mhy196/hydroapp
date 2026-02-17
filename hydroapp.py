@@ -6,6 +6,7 @@ from scipy.signal import find_peaks
 import io
 import datetime
 import numpy as np
+import re
 
 # --- 1. CONFIGURATION PAGE ---
 st.set_page_config(
@@ -61,16 +62,25 @@ if st.session_state.last_source != source_type:
 
 # --- FONCTIONS UTILITAIRES ---
 def smart_date_parser(series):
-    """Détecte intelligemment si c'est du Français (JJ/MM) ou de l'ISO (AAAA-MM-JJ)"""
-    # 1. Essai Format Français (Jour en premier)
+    """
+    Détecte intelligemment le format de date.
+    - Si commence par 4 chiffres (Année), force le format ISO (Année-Mois-Jour).
+    - Sinon, tente le format Français (Jour-Mois-Année).
+    """
+    # On prend un échantillon non vide
+    sample = series.dropna().astype(str).iloc[0] if not series.dropna().empty else ""
+    
+    # 1. Si commence par l'année (ex: 2026-02-06), on force dayfirst=False (Standard ISO)
+    if re.match(r'^\d{4}', sample):
+        return pd.to_datetime(series, dayfirst=False, errors='coerce')
+    
+    # 2. Sinon, on compare les erreurs entre FR et ISO
     dt_fr = pd.to_datetime(series, dayfirst=True, errors='coerce')
     nat_fr = dt_fr.isna().sum()
     
-    # 2. Essai Format Standard/ISO (Année ou Mois en premier)
     dt_iso = pd.to_datetime(series, dayfirst=False, errors='coerce')
     nat_iso = dt_iso.isna().sum()
     
-    # On garde celui qui a le moins d'erreurs (NaT)
     if nat_fr <= nat_iso:
         return dt_fr
     else:
@@ -91,17 +101,26 @@ if source_type == "📂 Fichier CSV":
     
     if uploaded_file:
         try:
-            # Lecture brute sans parsing de date initial
+            # Lecture brute
             df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
             df_raw.columns = [c.strip() for c in df_raw.columns]
             cols = df_raw.columns.tolist()
 
-            # Détection colonnes
+            # Détection colonnes (Date / Heure séparées ou combinées)
+            date_part_col = next((c for c in cols if "date" in c.lower() and "heure" not in c.lower()), None)
+            time_part_col = next((c for c in cols if any(x in c.lower() for x in ["heure", "time"]) and "date" not in c.lower()), None)
             combined_col = next((c for c in cols if "date" in c.lower()), cols[0])
             
-            # Sélecteurs (pour être sûr)
+            # Sélecteurs
             with st.expander("✅ Configuration Colonnes", expanded=True):
-                col_dt = st.selectbox("Col. Date/Heure", cols, index=cols.index(combined_col))
+                use_fusion = st.checkbox("Fusionner Date + Heure (ex: colonnes séparées)", value=(date_part_col is not None and time_part_col is not None))
+                
+                if use_fusion:
+                    c1, c2 = st.columns(2)
+                    col_d = c1.selectbox("Col. Date", cols, index=cols.index(date_part_col) if date_part_col else 0)
+                    col_h = c2.selectbox("Col. Heure", cols, index=cols.index(time_part_col) if time_part_col else 0)
+                else:
+                    col_dt = st.selectbox("Col. Date/Heure", cols, index=cols.index(combined_col))
                 
                 default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
                 default_obs = next((c for c in cols if "obs" in c.lower()), cols[2] if len(cols)>2 else cols[0])
@@ -113,8 +132,12 @@ if source_type == "📂 Fichier CSV":
             # Construction du DF
             df = pd.DataFrame()
             
-            # Parsing Intelligent de la Date
-            df['Datetime'] = smart_date_parser(df_raw[col_dt])
+            # Parsing Date
+            if use_fusion:
+                combined_series = df_raw[col_d].astype(str) + " " + df_raw[col_h].astype(str)
+                df['Datetime'] = smart_date_parser(combined_series)
+            else:
+                df['Datetime'] = smart_date_parser(df_raw[col_dt])
 
             # Parsing Numérique
             df['Simulé'] = clean_num(df_raw[sim_col_name])
@@ -131,10 +154,10 @@ if source_type == "📂 Fichier CSV":
             st.error(f"Erreur CSV : {e}")
 
 # ---------------------------------------------------------
-# CAS 2 : SAISIE MANUELLE (DÉBUT/FIN)
+# CAS 2 : SAISIE MANUELLE
 # ---------------------------------------------------------
 else:
-    st.info("💡 Définissez le Début et la Fin, puis collez vos données. Le système vérifiera le nombre de valeurs.")
+    st.info("💡 Définissez le Début et la Fin, puis collez vos données.")
 
     def parse_text_data(text):
         if not text.strip(): return []
@@ -151,7 +174,6 @@ else:
         sim_end_t   = c4.time_input("Heure Fin (Sim)", datetime.time(20, 0))
         sim_step    = c5.number_input("Pas (h)", 1, 24, 1, key="step_sim")
         
-        # Calcul du nombre attendu
         start_dt_sim = datetime.datetime.combine(sim_start_d, sim_start_t)
         end_dt_sim   = datetime.datetime.combine(sim_end_d, sim_end_t)
         
@@ -159,7 +181,6 @@ else:
             st.error("Erreur : La fin est avant le début !")
             nb_sim = 0
         else:
-            # On ajoute le pas pour inclure la borne de fin si nécessaire, ou on utilise date_range fermé
             sim_dates = pd.date_range(start=start_dt_sim, end=end_dt_sim, freq=f'{sim_step}h')
             nb_sim = len(sim_dates)
             st.caption(f"📅 Période : {start_dt_sim} -> {end_dt_sim} | **{nb_sim} valeurs attendues**")
@@ -209,8 +230,6 @@ else:
     if st.button("Générer Graphique Combiné", type="primary"):
         df_sim = pd.DataFrame()
         if sim_vals and nb_sim > 0:
-            # On tronque ou on adapte si ça dépasse pas trop, mais ici on prend strict ou souple
-            # Pour la robustesse, on prend le min
             L = min(len(sim_vals), len(sim_dates))
             df_sim = pd.DataFrame({'Datetime': sim_dates[:L], 'Simulé': sim_vals[:L]}).set_index('Datetime')
 
@@ -220,7 +239,6 @@ else:
             df_obs = pd.DataFrame({'Datetime': obs_dates[:L], 'Observé': obs_vals[:L]}).set_index('Datetime')
         
         if not df_sim.empty or not df_obs.empty:
-            # Fusion
             if not df_sim.empty and not df_obs.empty:
                 df = df_sim.join(df_obs, how='outer').reset_index()
             elif not df_sim.empty:
@@ -232,7 +250,7 @@ else:
             
             st.session_state.df_global = df.sort_values('Datetime')
         else:
-            st.error("Aucune donnée valide entrée.")
+            st.error("Aucune donnée valide.")
 
 
 # --- SUITE BARRE LATÉRALE ---
