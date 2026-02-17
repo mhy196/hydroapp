@@ -4,8 +4,10 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from scipy.signal import find_peaks
 import io
+import datetime
+import numpy as np
 
-# --- 1. CONFIGURATION PAGE (Menu Ouvert par défaut) ---
+# --- 1. CONFIGURATION PAGE ---
 st.set_page_config(
     page_title="Générateur d'Hydrogrammes", 
     layout="wide", 
@@ -13,134 +15,169 @@ st.set_page_config(
     initial_sidebar_state="expanded" 
 )
 
-# --- 2. STYLE CSS ROBUSTE (ACCESSIBILITÉ MAXIMALE) ---
+# --- 2. CSS ROBUSTE ---
 st.markdown("""
 <style>
-    /* VARIABLES */
-    :root {
-        --primary: #0277BD; 
-        --bg: #FAFAFA;
-        --sidebar: #F5F7F9;
-        --text: #2C3E50;
-    }
-
-    /* FOND GLOBAL */
+    :root { --primary: #0277BD; --bg: #FAFAFA; --sidebar: #F5F7F9; --text: #2C3E50; }
     .stApp { background-color: var(--bg); color: var(--text); }
+    section[data-testid="stSidebar"] { background-color: var(--sidebar); border-right: 2px solid #E0E0E0; }
+    section[data-testid="stSidebar"] * { color: #1F2937 !important; }
     
-    /* BARRE LATÉRALE - CONTRASTE */
-    section[data-testid="stSidebar"] {
-        background-color: var(--sidebar);
-        border-right: 2px solid #E0E0E0;
-    }
-    
-    /* TEXTES SIDEBAR */
-    section[data-testid="stSidebar"] * {
-        color: #1F2937 !important; /* Noir doux forcé */
-    }
-
-    /* --- SOLUTION MENU 1 : BOUTON FLÈCHE CUSTOMISÉ --- */
-    /* On cible le bouton qui permet de rouvrir le menu */
+    /* Bouton Menu (Flèche) */
     [data-testid="stSidebarCollapsedControl"] {
-        background-color: #FFFFFF !important; 
-        color: #0277BD !important;
-        border: 2px solid #0277BD !important;
-        border-radius: 50% !important;
-        padding: 5px !important;
-        width: 40px !important;
-        height: 40px !important;
-        top: 20px !important;
-        left: 20px !important;
-        z-index: 999999 !important; /* Au-dessus de tout */
-        box-shadow: 2px 2px 10px rgba(0,0,0,0.2) !important;
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
+        background-color: #FFFFFF !important; color: #0277BD !important;
+        border: 2px solid #0277BD !important; border-radius: 50%;
+        width: 40px; height: 40px; z-index: 999999;
     }
     
-    /* Icône dans le bouton */
-    [data-testid="stSidebarCollapsedControl"] svg {
-        fill: #0277BD !important;
-        width: 25px !important;
-        height: 25px !important;
+    /* Inputs Saisie */
+    .stTextInput > div > div > input, .stTextArea > div > div > textarea {
+        background-color: #FFFFFF !important; color: #000000 !important;
     }
-
-    /* --- TABLEAU SAISIE MANUELLE (Espace et Lisibilité) --- */
-    div[data-testid="stDataEditor"] {
-        border: 1px solid #0277BD;
-        border-radius: 8px;
-        background-color: white;
-    }
-
-    /* SLIDERS & INPUTS */
-    .stSlider > div > div > div > div { background-color: var(--primary) !important; }
     
-    /* CACHER MENU DEBUG (optionnel) */
-    div[data-testid="stToolbar"] { visibility: visible; } 
-    
+    h1 { color: var(--primary) !important; }
+    div[data-testid="stToolbar"] { visibility: visible; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- BOUTON SECOURS (SOLUTION MENU 2) ---
-# Un bouton discret en haut à droite pour forcer la réouverture si besoin
+# BOUTON SECOURS
 col_title, col_reset = st.columns([6, 1])
-with col_title:
-    st.title("🌊 Générateur d'Hydrogrammes")
-with col_reset:
-    if st.button("🔄 Ouvrir Menu"):
-        st.rerun()
+with col_title: st.title("🌊 Générateur d'Hydrogrammes")
+with col_reset: 
+    if st.button("🔄 Reset"): st.rerun()
 
 st.markdown("---")
 
 # --- INITIALISATION ---
 df = None 
 
-# --- BARRE LATÉRALE ---
+# --- BARRE LATÉRALE (NAVIGATION) ---
 st.sidebar.title("1. Données")
-
-# CHOIX SOURCE
-source_type = st.sidebar.radio(
-    "Source des données :", 
-    ["📂 Fichier CSV", "✍️ Saisie Manuelle / Excel"], 
-    index=0
-)
+source_type = st.sidebar.radio("Source :", ["📂 Fichier CSV", "✍️ Saisie Manuelle"], index=0)
 
 # --- LOGIQUE D'IMPORTATION ---
 
+# ---------------------------------------------------------
+# CAS 1 : IMPORT CSV (AMÉLIORÉ POUR ROBUSTESSE)
+# ---------------------------------------------------------
 if source_type == "📂 Fichier CSV":
-    st.sidebar.info("Format attendu : Colonnes Date, Simulé, Observé.")
-    uploaded_file = st.sidebar.file_uploader("Glissez votre fichier ici", type=["csv"])
+    st.sidebar.info("Format : Date, Simulé, Observé")
+    uploaded_file = st.sidebar.file_uploader("Fichier CSV", type=["csv"])
+    
     if uploaded_file:
         try:
-            df = pd.read_csv(uploaded_file)
+            # engine='python' et sep=None détecte automatiquement ; ou ,
+            df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
+            
+            # Nettoyage des colonnes (suppression espaces)
+            df_raw.columns = [c.strip() for c in df_raw.columns]
+            cols = df_raw.columns.tolist()
+
+            # Détection colonnes
+            default_date = next((c for c in cols if any(x in c.lower() for x in ["date", "time", "heure"])), cols[0])
+            default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
+            default_obs = next((c for c in cols if "obs" in c.lower()), cols[2] if len(cols)>2 else cols[0])
+
+            with st.expander("✅ Vérifier les colonnes", expanded=True):
+                c1, c2, c3 = st.columns(3)
+                date_col = c1.selectbox("Date", cols, index=cols.index(default_date))
+                sim_col = c2.selectbox("Simulé", cols, index=cols.index(default_sim))
+                obs_col = c3.selectbox("Observé", cols, index=cols.index(default_obs))
+
+            # Création du DF final propre
+            df = pd.DataFrame()
+            # Conversion Date robuste
+            df['Datetime'] = pd.to_datetime(df_raw[date_col], dayfirst=True, errors='coerce')
+            
+            # Conversion Numérique robuste (gère "1 000", "1,5", etc)
+            def clean_numeric(series):
+                # Convertit en string, remplace , par ., enlève les espaces, puis convertit en nombre
+                return pd.to_numeric(series.astype(str).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False), errors='coerce')
+
+            df[sim_col] = clean_numeric(df_raw[sim_col])
+            df[obs_col] = clean_numeric(df_raw[obs_col])
+            
+            # Supprime les dates invalides
+            df = df.dropna(subset=['Datetime'])
+            df = df.sort_values('Datetime')
+
         except Exception as e:
-            st.error(f"Erreur CSV : {e}")
+            st.error(f"Erreur lors de la lecture du CSV : {e}")
 
-else: # SAISIE MANUELLE (AFFICHER AU CENTRE POUR PLUS DE PLACE)
-    st.info("💡 **Mode Édition :** Copiez vos données depuis Excel (Ctrl+C) et collez-les dans la première case ci-dessous (Ctrl+V).")
+# ---------------------------------------------------------
+# CAS 2 : SAISIE MANUELLE (NOUVELLE LOGIQUE)
+# ---------------------------------------------------------
+else:
+    st.info("💡 **Générateur Automatique :** Définissez la période, puis collez simplement vos valeurs.")
     
-    # Données par défaut pour guider l'utilisateur
-    default_data = pd.DataFrame([
-        {"Date": "04/02/2026 08:00", "Simulé": 2394, "Observé": 2598},
-        {"Date": "04/02/2026 12:00", "Simulé": 2100, "Observé": 2300},
-        {"Date": "04/02/2026 16:00", "Simulé": 1800, "Observé": 1950},
-        {"Date": "04/02/2026 20:00", "Simulé": 1500, "Observé": 1600},
-    ])
+    # 1. Configuration Temporelle
+    c1, c2, c3, c4, c5 = st.columns(5)
+    start_d = c1.date_input("Date Début", datetime.date.today())
+    start_t = c2.time_input("Heure Début", datetime.time(8, 0))
+    end_d = c3.date_input("Date Fin", datetime.date.today() + datetime.timedelta(days=1))
+    end_t = c4.time_input("Heure Fin", datetime.time(8, 0))
+    step_h = c5.number_input("Pas (heures)", min_value=1, value=1)
+    
+    # Génération de l'axe temps
+    start_dt = datetime.datetime.combine(start_d, start_t)
+    end_dt = datetime.datetime.combine(end_d, end_t)
+    
+    if start_dt >= end_dt:
+        st.error("⚠️ La date de fin doit être après la date de début.")
+    else:
+        # Création de la plage de dates
+        date_range = pd.date_range(start=start_dt, end=end_dt, freq=f'{step_h}h')
+        nb_values = len(date_range)
+        
+        st.markdown(f"**⏳ Période :** {nb_values} valeurs attendues (de {start_dt} à {end_dt})")
+        
+        # 2. Saisie des Valeurs (Text Area pour copier-coller)
+        col_sim, col_obs = st.columns(2)
+        
+        def parse_values(text, expected_len):
+            if not text.strip(): return None
+            # Remplace virgules, retours à la ligne par espaces, puis split
+            clean_text = text.replace('\n', ' ').replace(',', '.').replace(';', ' ')
+            try:
+                values = [float(v) for v in clean_text.split() if v.strip()]
+                return values
+            except:
+                return "error"
 
-    # Le tableau est maintenant dans la page principale (plus large)
-    edited_df = st.data_editor(
-        default_data,
-        num_rows="dynamic",
-        use_container_width=True,
-        height=300, # Assez haut pour voir
-        column_config={
-            "Date": st.column_config.TextColumn("Date (JJ/MM/AAAA HH:MM)", help="Format recommandé: 04/02/2026 08:00"),
-            "Simulé": st.column_config.NumberColumn("Débit Simulé (m³/s)"),
-            "Observé": st.column_config.NumberColumn("Débit Observé (m³/s)"),
-        }
-    )
-    
-    if not edited_df.empty:
-        df = edited_df
+        with col_sim:
+            st.markdown("### 🔵 Débits Simulé")
+            txt_sim = st.text_area("Collez les valeurs ici (Excel, liste...)", height=150, help="Copiez votre colonne Excel et collez-la ici.")
+            vals_sim = parse_values(txt_sim, nb_values)
+            
+            if vals_sim == "error": st.warning("Contient du texte non numérique.")
+            elif vals_sim and len(vals_sim) != nb_values: 
+                st.warning(f"⚠️ {len(vals_sim)} valeurs entrées / {nb_values} attendues")
+            elif vals_sim: st.success(f"✅ {len(vals_sim)} valeurs valides")
+
+        with col_obs:
+            st.markdown("### 🔴 Débits Observé")
+            txt_obs = st.text_area("Collez les valeurs ici", height=150)
+            vals_obs = parse_values(txt_obs, nb_values)
+            
+            if vals_obs == "error": st.warning("Erreur format.")
+            elif vals_obs and len(vals_obs) != nb_values: 
+                st.warning(f"⚠️ {len(vals_obs)} valeurs / {nb_values} attendues")
+            elif vals_obs: st.success("✅ OK")
+
+        # 3. Validation
+        if st.button("Générer le Graphique", type="primary"):
+            if vals_sim and vals_obs and len(vals_sim) == nb_values and len(vals_obs) == nb_values:
+                df = pd.DataFrame({
+                    'Datetime': date_range,
+                    'Simulé': vals_sim,
+                    'Observé': vals_obs
+                })
+                # On définit les colonnes pour la suite
+                sim_col = 'Simulé'
+                obs_col = 'Observé'
+                date_col = 'Datetime'
+            else:
+                st.error("Veuillez vérifier que le nombre de valeurs correspond exactement à la période définie.")
 
 # --- SUITE BARRE LATÉRALE (RÉGLAGES) ---
 st.sidebar.markdown("---")
@@ -158,7 +195,6 @@ with st.sidebar.expander("⚙️ Réglages Avancés"):
     peak_sensitivity = st.slider("Sensibilité", 1, 200, 10)
     
     st.markdown("**Layout**")
-    # Slider Horizontal (Négatif = Inverse)
     global_x_offset = st.slider("Écart Horizontal (Neg=Inv)", -100, 100, 25)
     label_size = st.slider("Taille Texte", 8, 20, 11)
     show_hours = st.checkbox("Heures sur Axe X", value=True)
@@ -178,34 +214,14 @@ def get_peak_indices(series, n, prominence=10, distance=5):
 # --- TRAITEMENT & GRAPHIQUE ---
 if df is not None and not df.empty:
     try:
-        # Nettoyage des noms de colonnes (strip spaces)
-        df.columns = [c.strip() for c in df.columns]
-        cols = df.columns.tolist()
-        
-        # Détection automatique des colonnes
-        # On cherche 'date' ou 'time', 'sim', 'obs'
-        default_date = next((c for c in cols if any(x in c.lower() for x in ["date", "time", "heure"])), cols[0])
-        default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
-        default_obs = next((c for c in cols if "obs" in c.lower()), cols[2] if len(cols)>2 else cols[0])
-
-        # Si import CSV, on permet de corriger les colonnes. Si manuel, on fait confiance au tableau.
-        if source_type == "📂 Fichier CSV":
-             with st.expander("✅ Vérifier les colonnes détectées", expanded=False):
-                col_sel1, col_sel2, col_sel3 = st.columns(3)
-                date_col = col_sel1.selectbox("Date", cols, index=cols.index(default_date))
-                sim_col = col_sel2.selectbox("Simulé", cols, index=cols.index(default_sim))
-                obs_col = col_sel3.selectbox("Observé", cols, index=cols.index(default_obs))
-        else:
-             date_col, sim_col, obs_col = default_date, default_sim, default_obs
-
-        # Conversion Dates
-        df['Datetime'] = pd.to_datetime(df[date_col], dayfirst=True, errors='coerce')
-        df = df.dropna(subset=['Datetime']) 
-        df = df.sort_values('Datetime')
-
-        if df.empty:
-            st.warning("⚠️ Aucune date valide. Vérifiez le format (JJ/MM/AAAA HH:MM).")
-            st.stop()
+        # Si c'est un CSV, les noms de colonnes ont été définis plus haut.
+        # Si c'est manuel, ils sont définis dans le bloc manuel.
+        # On vérifie juste qu'on a bien les noms.
+        if 'sim_col' not in locals(): # Cas CSV où df est chargé mais vars pas globales
+             # On recupère les noms du df
+             cols = df.columns
+             # On assume l'ordre standard du nettoyage CSV
+             date_col, sim_col, obs_col = cols[0], cols[1], cols[2] # Fallback simple
 
         # Calculs Pics
         sim_indices = get_peak_indices(df[sim_col], n_peaks, prominence=peak_sensitivity)
@@ -216,7 +232,6 @@ if df is not None and not df.empty:
         st.sidebar.header("3. Ajustement Fin")
         manual_offsets = {}
         
-        # On affiche les ajustements si le nombre de pics est raisonnable
         expand_manual = len(sim_indices) + len(obs_indices) < 8
         
         with st.sidebar.expander("🔵 Pics Simulé", expanded=expand_manual):
@@ -252,15 +267,12 @@ if df is not None and not df.empty:
                 val = df.loc[idx, col_name]
                 time = df.loc[idx, 'Datetime']
                 
-                # Offset Global
                 base_x = global_x_offset if is_sim else -global_x_offset
                 base_y = 40 
                 
-                # Offset Manuel
                 k = f"sim_{idx}" if is_sim else f"obs_{idx}"
                 mdx, mdy = manual_offsets.get(k, (0,0))
                 
-                # Dessin
                 ax.scatter(time, val, color=color, s=180, zorder=5, edgecolors='white', lw=2)
                 ax.annotate(f"{val:.0f}", xy=(time, val), xytext=(base_x + mdx, base_y + mdy), 
                             textcoords='offset points', ha='center', va='bottom', 
@@ -271,14 +283,12 @@ if df is not None and not df.empty:
         draw_labels(sim_indices, sim_col, col_sim_pick, is_sim=True)
         draw_labels(obs_indices, obs_col, col_obs_pick, is_sim=False)
         
-        # TITRES & STYLE
         ax.set_title(title, fontsize=20, fontweight='600', pad=20, color='#2C3E50')
         ax.set_ylabel(ylabel, fontsize=12, fontweight='bold', color='#2C3E50')
         ax.set_xlabel(xlabel, fontsize=12, fontweight='bold', color='#2C3E50')
         ax.grid(True, alpha=0.2, color='#2C3E50', ls='-')
         ax.legend(fontsize=11, loc='upper right', frameon=True, framealpha=1.0, facecolor='white', edgecolor='#E1E4E8').set_zorder(10)
         
-        # AXE X
         duration = (df['Datetime'].max() - df['Datetime'].min()).days
         if duration < 5:
             locator = mdates.HourLocator(interval=4 if show_hours else 24)
@@ -294,14 +304,13 @@ if df is not None and not df.empty:
             
         st.pyplot(fig)
         
-        # DOWNLOAD
         clean_title = title.replace(" ", "_").lower()
         img = io.BytesIO()
         fig.savefig(img, format='png', dpi=300, bbox_inches='tight', facecolor='white')
         st.download_button("💾 Télécharger l'image", data=img, file_name=f"{clean_title}.png", mime="image/png", use_container_width=True)
 
     except Exception as e:
-        st.error(f"Une erreur est survenue : {e}")
+        st.error(f"Erreur de traitement : {e}")
 
 else:
     if source_type == "📂 Fichier CSV":
