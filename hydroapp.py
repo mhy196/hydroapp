@@ -44,18 +44,46 @@ with col_reset:
         st.rerun()
 st.markdown("---")
 
-# --- GESTION DE LA MÉMOIRE (SESSION STATE) ---
+# --- GESTION DE LA MÉMOIRE ---
 if 'df_global' not in st.session_state:
     st.session_state.df_global = None
+if 'last_source' not in st.session_state:
+    st.session_state.last_source = None
 
 # --- BARRE LATÉRALE ---
 st.sidebar.title("1. Données")
 source_type = st.sidebar.radio("Source :", ["📂 Fichier CSV", "✍️ Saisie Manuelle Indépendante"], index=0)
 
+# Reset si on change de source
+if st.session_state.last_source != source_type:
+    st.session_state.df_global = None
+    st.session_state.last_source = source_type
+
+# --- FONCTIONS UTILITAIRES ---
+def smart_date_parser(series):
+    """Détecte intelligemment si c'est du Français (JJ/MM) ou de l'ISO (AAAA-MM-JJ)"""
+    # 1. Essai Format Français (Jour en premier)
+    dt_fr = pd.to_datetime(series, dayfirst=True, errors='coerce')
+    nat_fr = dt_fr.isna().sum()
+    
+    # 2. Essai Format Standard/ISO (Année ou Mois en premier)
+    dt_iso = pd.to_datetime(series, dayfirst=False, errors='coerce')
+    nat_iso = dt_iso.isna().sum()
+    
+    # On garde celui qui a le moins d'erreurs (NaT)
+    if nat_fr <= nat_iso:
+        return dt_fr
+    else:
+        return dt_iso
+
+def clean_num(s):
+    """Nettoie les nombres (virgules, espaces)"""
+    return pd.to_numeric(s.astype(str).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False), errors='coerce')
+
 # --- LOGIQUE D'IMPORTATION ---
 
 # ---------------------------------------------------------
-# CAS 1 : IMPORT CSV
+# CAS 1 : IMPORT CSV (CORRIGÉ)
 # ---------------------------------------------------------
 if source_type == "📂 Fichier CSV":
     st.sidebar.info("Format : Date, Simulé, Observé")
@@ -63,23 +91,17 @@ if source_type == "📂 Fichier CSV":
     
     if uploaded_file:
         try:
+            # Lecture brute sans parsing de date initial
             df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
             df_raw.columns = [c.strip() for c in df_raw.columns]
             cols = df_raw.columns.tolist()
 
-            date_part_col = next((c for c in cols if "date" in c.lower() and "heure" not in c.lower()), None)
-            time_part_col = next((c for c in cols if any(x in c.lower() for x in ["heure", "time"]) and "date" not in c.lower()), None)
+            # Détection colonnes
             combined_col = next((c for c in cols if "date" in c.lower()), cols[0])
-
+            
+            # Sélecteurs (pour être sûr)
             with st.expander("✅ Configuration Colonnes", expanded=True):
-                use_fusion = st.checkbox("Fusionner Date + Heure", value=(date_part_col is not None and time_part_col is not None))
-                
-                if use_fusion:
-                    c1, c2 = st.columns(2)
-                    col_d = c1.selectbox("Col. Date", cols, index=cols.index(date_part_col) if date_part_col else 0)
-                    col_h = c2.selectbox("Col. Heure", cols, index=cols.index(time_part_col) if time_part_col else 0)
-                else:
-                    col_dt = st.selectbox("Col. Date/Heure", cols, index=cols.index(combined_col))
+                col_dt = st.selectbox("Col. Date/Heure", cols, index=cols.index(combined_col))
                 
                 default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
                 default_obs = next((c for c in cols if "obs" in c.lower()), cols[2] if len(cols)>2 else cols[0])
@@ -90,17 +112,15 @@ if source_type == "📂 Fichier CSV":
 
             # Construction du DF
             df = pd.DataFrame()
-            if use_fusion:
-                combined_series = df_raw[col_d].astype(str) + " " + df_raw[col_h].astype(str)
-                df['Datetime'] = pd.to_datetime(combined_series, dayfirst=True, errors='coerce')
-            else:
-                df['Datetime'] = pd.to_datetime(df_raw[col_dt], dayfirst=True, errors='coerce')
-
-            def clean_num(s): return pd.to_numeric(s.astype(str).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False), errors='coerce')
             
+            # Parsing Intelligent de la Date
+            df['Datetime'] = smart_date_parser(df_raw[col_dt])
+
+            # Parsing Numérique
             df['Simulé'] = clean_num(df_raw[sim_col_name])
             df['Observé'] = clean_num(df_raw[obs_col_name])
             
+            # Nettoyage final
             df = df.dropna(subset=['Datetime'])
             df = df.sort_values('Datetime')
             
@@ -111,67 +131,108 @@ if source_type == "📂 Fichier CSV":
             st.error(f"Erreur CSV : {e}")
 
 # ---------------------------------------------------------
-# CAS 2 : SAISIE MANUELLE
+# CAS 2 : SAISIE MANUELLE (DÉBUT/FIN)
 # ---------------------------------------------------------
 else:
-    st.info("💡 **Mode Indépendant :** Définissez le début de chaque série séparément.")
+    st.info("💡 Définissez le Début et la Fin, puis collez vos données. Le système vérifiera le nombre de valeurs.")
 
     def parse_text_data(text):
         if not text.strip(): return []
         clean = text.replace('\n', ' ').replace(',', '.').replace(';', ' ')
         return [float(v) for v in clean.split() if v.strip()]
 
+    # --- BLOC SIMULÉ ---
     with st.container():
         st.markdown("### 🔵 Série Simulée")
-        c1, c2, c3 = st.columns([1, 1, 2])
+        c1, c2, c3, c4, c5 = st.columns(5)
         sim_start_d = c1.date_input("Date Début (Sim)", datetime.date.today())
         sim_start_t = c2.time_input("Heure Début (Sim)", datetime.time(8, 0))
-        sim_step = c3.number_input("Pas (heures)", 1, 24, 1, key="step_sim")
+        sim_end_d   = c3.date_input("Date Fin (Sim)", datetime.date.today())
+        sim_end_t   = c4.time_input("Heure Fin (Sim)", datetime.time(20, 0))
+        sim_step    = c5.number_input("Pas (h)", 1, 24, 1, key="step_sim")
+        
+        # Calcul du nombre attendu
+        start_dt_sim = datetime.datetime.combine(sim_start_d, sim_start_t)
+        end_dt_sim   = datetime.datetime.combine(sim_end_d, sim_end_t)
+        
+        if start_dt_sim > end_dt_sim:
+            st.error("Erreur : La fin est avant le début !")
+            nb_sim = 0
+        else:
+            # On ajoute le pas pour inclure la borne de fin si nécessaire, ou on utilise date_range fermé
+            sim_dates = pd.date_range(start=start_dt_sim, end=end_dt_sim, freq=f'{sim_step}h')
+            nb_sim = len(sim_dates)
+            st.caption(f"📅 Période : {start_dt_sim} -> {end_dt_sim} | **{nb_sim} valeurs attendues**")
+
         sim_txt = st.text_area("Collez les valeurs SIMULÉES ici", height=100, key="txt_sim")
         sim_vals = parse_text_data(sim_txt)
-        if sim_vals: st.caption(f"✅ {len(sim_vals)} valeurs")
+        
+        if sim_vals:
+            if len(sim_vals) == nb_sim:
+                st.success(f"✅ Parfait : {len(sim_vals)} valeurs.")
+            else:
+                st.warning(f"⚠️ Attention : {len(sim_vals)} valeurs collées pour {nb_sim} attendues.")
         
     st.markdown("---")
     
+    # --- BLOC OBSERVÉ ---
     with st.container():
         st.markdown("### 🔴 Série Observée")
-        c1, c2, c3 = st.columns([1, 1, 2])
+        c1, c2, c3, c4, c5 = st.columns(5)
         obs_start_d = c1.date_input("Date Début (Obs)", datetime.date.today())
         obs_start_t = c2.time_input("Heure Début (Obs)", datetime.time(8, 0))
-        obs_step = c3.number_input("Pas (heures)", 1, 24, 1, key="step_obs")
+        obs_end_d   = c3.date_input("Date Fin (Obs)", datetime.date.today())
+        obs_end_t   = c4.time_input("Heure Fin (Obs)", datetime.time(20, 0))
+        obs_step    = c5.number_input("Pas (h)", 1, 24, 1, key="step_obs")
+        
+        start_dt_obs = datetime.datetime.combine(obs_start_d, obs_start_t)
+        end_dt_obs   = datetime.datetime.combine(obs_end_d, obs_end_t)
+        
+        if start_dt_obs > end_dt_obs:
+            st.error("Erreur Date")
+            nb_obs = 0
+        else:
+            obs_dates = pd.date_range(start=start_dt_obs, end=end_dt_obs, freq=f'{obs_step}h')
+            nb_obs = len(obs_dates)
+            st.caption(f"📅 Période : {start_dt_obs} -> {end_dt_obs} | **{nb_obs} valeurs attendues**")
+
         obs_txt = st.text_area("Collez les valeurs OBSERVÉES ici", height=100, key="txt_obs")
         obs_vals = parse_text_data(obs_txt)
-        if obs_vals: st.caption(f"✅ {len(obs_vals)} valeurs")
 
-    # BOUTON QUI DÉCLENCHE LE CALCUL
+        if obs_vals:
+            if len(obs_vals) == nb_obs:
+                st.success(f"✅ Parfait : {len(obs_vals)} valeurs.")
+            else:
+                st.warning(f"⚠️ Attention : {len(obs_vals)} valeurs collées pour {nb_obs} attendues.")
+
+    # BOUTON GÉNÉRATION
     if st.button("Générer Graphique Combiné", type="primary"):
         df_sim = pd.DataFrame()
-        if sim_vals:
-            start_dt = datetime.datetime.combine(sim_start_d, sim_start_t)
-            dates = pd.date_range(start=start_dt, periods=len(sim_vals), freq=f'{sim_step}h')
-            df_sim = pd.DataFrame({'Datetime': dates, 'Simulé': sim_vals}).set_index('Datetime')
+        if sim_vals and nb_sim > 0:
+            # On tronque ou on adapte si ça dépasse pas trop, mais ici on prend strict ou souple
+            # Pour la robustesse, on prend le min
+            L = min(len(sim_vals), len(sim_dates))
+            df_sim = pd.DataFrame({'Datetime': sim_dates[:L], 'Simulé': sim_vals[:L]}).set_index('Datetime')
 
         df_obs = pd.DataFrame()
-        if obs_vals:
-            start_dt = datetime.datetime.combine(obs_start_d, obs_start_t)
-            dates = pd.date_range(start=start_dt, periods=len(obs_vals), freq=f'{obs_step}h')
-            df_obs = pd.DataFrame({'Datetime': dates, 'Observé': obs_vals}).set_index('Datetime')
+        if obs_vals and nb_obs > 0:
+            L = min(len(obs_vals), len(obs_dates))
+            df_obs = pd.DataFrame({'Datetime': obs_dates[:L], 'Observé': obs_vals[:L]}).set_index('Datetime')
         
-        if not df_sim.empty and not df_obs.empty:
-            df = df_sim.join(df_obs, how='outer').reset_index()
-        elif not df_sim.empty:
-            df = df_sim.reset_index()
-            df['Observé'] = np.nan
-        elif not df_obs.empty:
-            df = df_obs.reset_index()
-            df['Simulé'] = np.nan
-        else:
-            df = None
-
-        if df is not None:
+        if not df_sim.empty or not df_obs.empty:
+            # Fusion
+            if not df_sim.empty and not df_obs.empty:
+                df = df_sim.join(df_obs, how='outer').reset_index()
+            elif not df_sim.empty:
+                df = df_sim.reset_index()
+                df['Observé'] = np.nan
+            else:
+                df = df_obs.reset_index()
+                df['Simulé'] = np.nan
+            
             st.session_state.df_global = df.sort_values('Datetime')
         else:
-            st.error("Aucune donnée valide.")
+            st.error("Aucune donnée valide entrée.")
 
 
 # --- SUITE BARRE LATÉRALE ---
@@ -194,7 +255,7 @@ with st.sidebar.expander("⚙️ Réglages Avancés"):
     ylabel = st.text_input("Label Y", "Débit (m³/s)")
     xlabel = st.text_input("Label X", "Date et Heure")
 
-# --- FONCTIONS ---
+# --- FONCTIONS PICS ---
 def get_peak_indices(series, n, prominence=10, distance=5):
     series = series.fillna(0)
     peaks, _ = find_peaks(series, prominence=prominence, distance=distance)
@@ -204,17 +265,14 @@ def get_peak_indices(series, n, prominence=10, distance=5):
     return sorted(peak_df.sort_values(by='val', ascending=False).head(n)['index'].tolist())
 
 # --- AFFICHAGE PERSISTANT ---
-# On vérifie si on a des données en mémoire
 if st.session_state.df_global is not None:
     df = st.session_state.df_global
     sim_col, obs_col = 'Simulé', 'Observé'
 
     try:
-        # Calculs Pics
         sim_indices = get_peak_indices(df[sim_col], n_peaks, prominence=peak_sensitivity)
         obs_indices = get_peak_indices(df[obs_col], n_peaks, prominence=peak_sensitivity)
         
-        # AJUSTEMENT MANUEL
         st.sidebar.markdown("---")
         st.sidebar.header("3. Ajustement Fin")
         manual_offsets = {}
@@ -242,10 +300,8 @@ if st.session_state.df_global is not None:
                 manual_offsets[f"obs_{idx}"] = (dx, dy)
                 st.markdown("---")
 
-        # GRAPHIQUE
         fig, ax = plt.subplots(figsize=(16, 9), facecolor='white')
         
-        # Tracé Simulé
         if sim_col in df and df[sim_col].notna().any():
             ax.plot(df['Datetime'], df[sim_col], color=col_sim_pick, lw=2.5, label='Débit Simulé', zorder=2)
             for idx in sim_indices:
@@ -259,7 +315,6 @@ if st.session_state.df_global is not None:
                             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=col_sim_pick, lw=1.5, alpha=0.95),
                             arrowprops=dict(arrowstyle="-", color=col_sim_pick, lw=1.5), zorder=10)
 
-        # Tracé Observé
         if obs_col in df and df[obs_col].notna().any():
             ax.plot(df['Datetime'], df[obs_col], color=col_obs_pick, lw=2.5, ls='--', label='Débit Observé', zorder=2)
             for idx in obs_indices:
