@@ -55,66 +55,42 @@ if 'last_source' not in st.session_state:
 st.sidebar.title("1. Données")
 source_type = st.sidebar.radio("Source :", ["📂 Fichier CSV", "✍️ Saisie Manuelle Indépendante"], index=0)
 
-# Reset si on change de source
 if st.session_state.last_source != source_type:
     st.session_state.df_global = None
     st.session_state.last_source = source_type
 
 # --- FONCTIONS UTILITAIRES ---
 def smart_date_parser(series):
-    """
-    Détecte intelligemment le format de date.
-    - Si commence par 4 chiffres (Année), force le format ISO (Année-Mois-Jour).
-    - Sinon, tente le format Français (Jour-Mois-Année).
-    """
-    # On prend un échantillon non vide
     sample = series.dropna().astype(str).iloc[0] if not series.dropna().empty else ""
-    
-    # 1. Si commence par l'année (ex: 2026-02-06), on force dayfirst=False (Standard ISO)
     if re.match(r'^\d{4}', sample):
         return pd.to_datetime(series, dayfirst=False, errors='coerce')
-    
-    # 2. Sinon, on compare les erreurs entre FR et ISO
     dt_fr = pd.to_datetime(series, dayfirst=True, errors='coerce')
     nat_fr = dt_fr.isna().sum()
-    
     dt_iso = pd.to_datetime(series, dayfirst=False, errors='coerce')
     nat_iso = dt_iso.isna().sum()
-    
-    if nat_fr <= nat_iso:
-        return dt_fr
-    else:
-        return dt_iso
+    if nat_fr <= nat_iso: return dt_fr
+    else: return dt_iso
 
 def clean_num(s):
-    """Nettoie les nombres (virgules, espaces)"""
     return pd.to_numeric(s.astype(str).str.replace(',', '.', regex=False).str.replace(' ', '', regex=False), errors='coerce')
 
 # --- LOGIQUE D'IMPORTATION ---
-
-# ---------------------------------------------------------
-# CAS 1 : IMPORT CSV (CORRIGÉ)
-# ---------------------------------------------------------
 if source_type == "📂 Fichier CSV":
     st.sidebar.info("Format : Date, Simulé, Observé")
     uploaded_file = st.sidebar.file_uploader("Fichier CSV", type=["csv"], key="csv_uploader")
     
     if uploaded_file:
         try:
-            # Lecture brute
             df_raw = pd.read_csv(uploaded_file, sep=None, engine='python')
             df_raw.columns = [c.strip() for c in df_raw.columns]
             cols = df_raw.columns.tolist()
 
-            # Détection colonnes (Date / Heure séparées ou combinées)
             date_part_col = next((c for c in cols if "date" in c.lower() and "heure" not in c.lower()), None)
             time_part_col = next((c for c in cols if any(x in c.lower() for x in ["heure", "time"]) and "date" not in c.lower()), None)
             combined_col = next((c for c in cols if "date" in c.lower()), cols[0])
             
-            # Sélecteurs
             with st.expander("✅ Configuration Colonnes", expanded=True):
-                use_fusion = st.checkbox("Fusionner Date + Heure (ex: colonnes séparées)", value=(date_part_col is not None and time_part_col is not None))
-                
+                use_fusion = st.checkbox("Fusionner Date + Heure", value=(date_part_col is not None and time_part_col is not None))
                 if use_fusion:
                     c1, c2 = st.columns(2)
                     col_d = c1.selectbox("Col. Date", cols, index=cols.index(date_part_col) if date_part_col else 0)
@@ -124,47 +100,33 @@ if source_type == "📂 Fichier CSV":
                 
                 default_sim = next((c for c in cols if "sim" in c.lower()), cols[1] if len(cols)>1 else cols[0])
                 default_obs = next((c for c in cols if "obs" in c.lower()), cols[2] if len(cols)>2 else cols[0])
-                
                 c3, c4 = st.columns(2)
                 sim_col_name = c3.selectbox("Col. Simulé", cols, index=cols.index(default_sim))
                 obs_col_name = c4.selectbox("Col. Observé", cols, index=cols.index(default_obs))
 
-            # Construction du DF
             df = pd.DataFrame()
-            
-            # Parsing Date
             if use_fusion:
                 combined_series = df_raw[col_d].astype(str) + " " + df_raw[col_h].astype(str)
                 df['Datetime'] = smart_date_parser(combined_series)
             else:
                 df['Datetime'] = smart_date_parser(df_raw[col_dt])
 
-            # Parsing Numérique
             df['Simulé'] = clean_num(df_raw[sim_col_name])
             df['Observé'] = clean_num(df_raw[obs_col_name])
-            
-            # Nettoyage final
             df = df.dropna(subset=['Datetime'])
             df = df.sort_values('Datetime')
-            
-            # SAUVEGARDE EN MÉMOIRE
             st.session_state.df_global = df
 
         except Exception as e:
             st.error(f"Erreur CSV : {e}")
 
-# ---------------------------------------------------------
-# CAS 2 : SAISIE MANUELLE
-# ---------------------------------------------------------
 else:
     st.info("💡 Définissez le Début et la Fin, puis collez vos données.")
-
     def parse_text_data(text):
         if not text.strip(): return []
         clean = text.replace('\n', ' ').replace(',', '.').replace(';', ' ')
         return [float(v) for v in clean.split() if v.strip()]
 
-    # --- BLOC SIMULÉ ---
     with st.container():
         st.markdown("### 🔵 Série Simulée")
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -176,27 +138,16 @@ else:
         
         start_dt_sim = datetime.datetime.combine(sim_start_d, sim_start_t)
         end_dt_sim   = datetime.datetime.combine(sim_end_d, sim_end_t)
-        
-        if start_dt_sim > end_dt_sim:
-            st.error("Erreur : La fin est avant le début !")
-            nb_sim = 0
-        else:
-            sim_dates = pd.date_range(start=start_dt_sim, end=end_dt_sim, freq=f'{sim_step}h')
-            nb_sim = len(sim_dates)
-            st.caption(f"📅 Période : {start_dt_sim} -> {end_dt_sim} | **{nb_sim} valeurs attendues**")
+        sim_dates = pd.date_range(start=start_dt_sim, end=end_dt_sim, freq=f'{sim_step}h')
+        nb_sim = len(sim_dates)
+        st.caption(f"📅 Période : {start_dt_sim} -> {end_dt_sim} | **{nb_sim} valeurs attendues**")
 
-        sim_txt = st.text_area("Collez les valeurs SIMULÉES ici", height=100, key="txt_sim")
+        sim_txt = st.text_area("Collez valeurs SIM", height=100, key="txt_sim")
         sim_vals = parse_text_data(sim_txt)
-        
-        if sim_vals:
-            if len(sim_vals) == nb_sim:
-                st.success(f"✅ Parfait : {len(sim_vals)} valeurs.")
-            else:
-                st.warning(f"⚠️ Attention : {len(sim_vals)} valeurs collées pour {nb_sim} attendues.")
-        
+        if sim_vals: st.caption(f"✅ {len(sim_vals)} valeurs")
+
     st.markdown("---")
     
-    # --- BLOC OBSERVÉ ---
     with st.container():
         st.markdown("### 🔴 Série Observée")
         c1, c2, c3, c4, c5 = st.columns(5)
@@ -208,25 +159,14 @@ else:
         
         start_dt_obs = datetime.datetime.combine(obs_start_d, obs_start_t)
         end_dt_obs   = datetime.datetime.combine(obs_end_d, obs_end_t)
-        
-        if start_dt_obs > end_dt_obs:
-            st.error("Erreur Date")
-            nb_obs = 0
-        else:
-            obs_dates = pd.date_range(start=start_dt_obs, end=end_dt_obs, freq=f'{obs_step}h')
-            nb_obs = len(obs_dates)
-            st.caption(f"📅 Période : {start_dt_obs} -> {end_dt_obs} | **{nb_obs} valeurs attendues**")
+        obs_dates = pd.date_range(start=start_dt_obs, end=end_dt_obs, freq=f'{obs_step}h')
+        nb_obs = len(obs_dates)
+        st.caption(f"📅 Période : {start_dt_obs} -> {end_dt_obs} | **{nb_obs} valeurs attendues**")
 
-        obs_txt = st.text_area("Collez les valeurs OBSERVÉES ici", height=100, key="txt_obs")
+        obs_txt = st.text_area("Collez valeurs OBS", height=100, key="txt_obs")
         obs_vals = parse_text_data(obs_txt)
+        if obs_vals: st.caption(f"✅ {len(obs_vals)} valeurs")
 
-        if obs_vals:
-            if len(obs_vals) == nb_obs:
-                st.success(f"✅ Parfait : {len(obs_vals)} valeurs.")
-            else:
-                st.warning(f"⚠️ Attention : {len(obs_vals)} valeurs collées pour {nb_obs} attendues.")
-
-    # BOUTON GÉNÉRATION
     if st.button("Générer Graphique Combiné", type="primary"):
         df_sim = pd.DataFrame()
         if sim_vals and nb_sim > 0:
@@ -247,31 +187,47 @@ else:
             else:
                 df = df_obs.reset_index()
                 df['Simulé'] = np.nan
-            
             st.session_state.df_global = df.sort_values('Datetime')
         else:
             st.error("Aucune donnée valide.")
 
-
 # --- SUITE BARRE LATÉRALE ---
 st.sidebar.markdown("---")
 st.sidebar.header("2. Apparence")
-title = st.sidebar.text_input("Titre", "Hydrogramme de Crue")
+
+# --- NOUVEAU : GESTION DES TITRES ---
+show_main_title = st.sidebar.checkbox("Afficher le titre", value=True)
+if show_main_title:
+    title = st.sidebar.text_input("Titre", "Hydrogramme de Crue")
+else:
+    title = ""
+
 c1, c2 = st.sidebar.columns(2)
 col_sim_pick = c1.color_picker("Simulé", "#0288D1") 
 col_obs_pick = c2.color_picker("Observé", "#D32F2F")
 
 with st.sidebar.expander("⚙️ Réglages Avancés"):
-    st.markdown("**Pics**")
+    st.markdown("**Pics & Points**")
     n_peaks = st.slider("Max Pics", 1, 20, 6)
     peak_sensitivity = st.slider("Sensibilité", 1, 200, 10)
+    # --- NOUVEAU : TAILLE DES POINTS ---
+    point_size = st.slider("Taille des points", 50, 500, 180, step=10)
+    
     st.markdown("**Layout**")
     global_x_offset = st.slider("Écart Horizontal (Neg=Inv)", -100, 100, 25)
     label_size = st.slider("Taille Texte", 8, 20, 11)
-    show_hours = st.checkbox("Heures sur Axe X", value=True)
+    
     st.markdown("**Axes**")
-    ylabel = st.text_input("Label Y", "Débit (m³/s)")
-    xlabel = st.text_input("Label X", "Date et Heure")
+    # --- NOUVEAU : GESTION DES TITRES AXES ---
+    show_axis_titles = st.checkbox("Afficher les titres des axes", value=True)
+    if show_axis_titles:
+        ylabel = st.text_input("Label Y", "Débit (m³/s)")
+        xlabel = st.text_input("Label X", "Date et Heure")
+    else:
+        ylabel = ""
+        xlabel = ""
+        
+    show_hours = st.checkbox("Heures sur Axe X", value=True)
 
 # --- FONCTIONS PICS ---
 def get_peak_indices(series, n, prominence=10, distance=5):
@@ -327,7 +283,8 @@ if st.session_state.df_global is not None:
                 time = df.loc[idx, 'Datetime']
                 base_x, base_y = global_x_offset, 40
                 mdx, mdy = manual_offsets.get(f"sim_{idx}", (0,0))
-                ax.scatter(time, val, color=col_sim_pick, s=180, zorder=5, edgecolors='white', lw=2)
+                # Utilisation de point_size
+                ax.scatter(time, val, color=col_sim_pick, s=point_size, zorder=5, edgecolors='white', lw=2)
                 ax.annotate(f"{val:.0f}", xy=(time, val), xytext=(base_x + mdx, base_y + mdy), 
                             textcoords='offset points', ha='center', va='bottom', fontsize=label_size, fontweight='bold', color=col_sim_pick,
                             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=col_sim_pick, lw=1.5, alpha=0.95),
@@ -340,15 +297,21 @@ if st.session_state.df_global is not None:
                 time = df.loc[idx, 'Datetime']
                 base_x, base_y = -global_x_offset, 40
                 mdx, mdy = manual_offsets.get(f"obs_{idx}", (0,0))
-                ax.scatter(time, val, color=col_obs_pick, s=180, zorder=5, edgecolors='white', lw=2)
+                # Utilisation de point_size
+                ax.scatter(time, val, color=col_obs_pick, s=point_size, zorder=5, edgecolors='white', lw=2)
                 ax.annotate(f"{val:.0f}", xy=(time, val), xytext=(base_x + mdx, base_y + mdy), 
                             textcoords='offset points', ha='center', va='bottom', fontsize=label_size, fontweight='bold', color=col_obs_pick,
                             bbox=dict(boxstyle="round,pad=0.3", fc="white", ec=col_obs_pick, lw=1.5, alpha=0.95),
                             arrowprops=dict(arrowstyle="-", color=col_obs_pick, lw=1.5), zorder=10)
         
-        ax.set_title(title, fontsize=20, fontweight='600', pad=20, color='#2C3E50')
-        ax.set_ylabel(ylabel, fontsize=12, fontweight='bold', color='#2C3E50')
-        ax.set_xlabel(xlabel, fontsize=12, fontweight='bold', color='#2C3E50')
+        # Gestion conditionnelle des titres
+        if show_main_title:
+            ax.set_title(title, fontsize=20, fontweight='600', pad=20, color='#2C3E50')
+        
+        if show_axis_titles:
+            ax.set_ylabel(ylabel, fontsize=12, fontweight='bold', color='#2C3E50')
+            ax.set_xlabel(xlabel, fontsize=12, fontweight='bold', color='#2C3E50')
+            
         ax.grid(True, alpha=0.2, color='#2C3E50', ls='-')
         ax.legend(fontsize=11, loc='upper right', frameon=True, framealpha=1.0, facecolor='white', edgecolor='#E1E4E8').set_zorder(10)
         
@@ -366,7 +329,7 @@ if st.session_state.df_global is not None:
             
         st.pyplot(fig)
         
-        clean_title = title.replace(" ", "_").lower()
+        clean_title = title.replace(" ", "_").lower() if title else "hydrogramme"
         img = io.BytesIO()
         fig.savefig(img, format='png', dpi=300, bbox_inches='tight', facecolor='white')
         st.download_button("💾 Télécharger l'image", data=img, file_name=f"{clean_title}.png", mime="image/png", use_container_width=True)
